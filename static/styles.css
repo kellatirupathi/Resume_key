@@ -160,3 +160,32 @@ table tbody tr:hover {
     color: red;
 }
 
+.spin-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    height: 100px;  /* Adjust the height as needed */
+    font-size: 20px; /* Increase the font size for better visibility */
+}
+
+.ant-spin-dot {
+    font-size: 40px; /* Increase the size of the spinner */
+}
+
+.ant-spin-dot-item {
+    background-color: #1890ff;
+    width: 20px;
+    height: 20px;
+}
+.center-message {
+    text-align: center;
+    font-weight: bold;
+    vertical-align: middle;
+    height: 480px;
+    font-size: 25px;
+}
+
+.time{
+    font-size: 20px;
+}
