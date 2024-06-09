@@ -219,7 +219,7 @@ function updateSearchCount(count) {
 }
 
 function calculateEstimatedTime(numberOfPdfs) {
-    const timePerPdf = 2; // Estimate 2 seconds per PDF for processing
+    const timePerPdf = 1; // Estimate 2 seconds per PDF for processing
     return numberOfPdfs * timePerPdf;
 }
 
