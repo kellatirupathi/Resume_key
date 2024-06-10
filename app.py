@@ -84,7 +84,7 @@ def search_keyword_in_pdfs(data, keywords):
     matched_entries = []
     total_keywords = len(keywords)
     
-    with ThreadPoolExecutor(max_workers=10) as executor:  # Adjust max_workers based on your server capacity
+    with ThreadPoolExecutor(max_workers=500) as executor:  # Adjust max_workers based on your server capacity
         futures = [executor.submit(process_pdf, entry, keywords, total_keywords) for entry in data]
         for future in as_completed(futures):
             result = future.result()
