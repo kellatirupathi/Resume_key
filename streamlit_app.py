@@ -26,9 +26,10 @@ st.set_page_config(
 )
 
 # Create an iframe to embed the Flask app
-st.markdown('''
+public_flask_url = "https://resumekey.streamlit.app/"  # Replace this with the public IP or domain if necessary
+st.markdown(f'''
     <style>
-    .full-screen-frame {
+    .full-screen-frame {{
         position: fixed;
         top: 0;
         left: 0;
@@ -39,7 +40,7 @@ st.markdown('''
         padding: 0;
         overflow: hidden;
         z-index: 999999;
-    }
+    }}
     </style>
-    <iframe src="http://localhost:8000" class="full-screen-frame"></iframe>
+    <iframe src="{public_flask_url}" class="full-screen-frame"></iframe>
 ''', unsafe_allow_html=True)
