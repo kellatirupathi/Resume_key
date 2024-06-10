@@ -41,5 +41,5 @@ st.markdown('''
         z-index: 999999;
     }
     </style>
-    <iframe src="/iframe" class="full-screen-frame"></iframe>
+    <iframe src="http://localhost:8000" class="full-screen-frame"></iframe>
 ''', unsafe_allow_html=True)
