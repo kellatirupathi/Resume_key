@@ -1,4 +1,3 @@
-# app.py
 from flask import Flask, request, jsonify, render_template
 import requests
 from PyPDF2 import PdfReader, errors
