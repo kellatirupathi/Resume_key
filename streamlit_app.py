@@ -25,6 +25,8 @@ st.set_page_config(
     page_icon="https://indiatechnologynews.in/wp-content/uploads/2021/09/nxt-wave.png"
 )
 
+# Create an iframe to embed the Flask app
+public_flask_url = "http://localhost:8000"  # Replace this with the public IP or domain if necessary
 st.markdown(f'''
     <style>
     .full-screen-frame {{
