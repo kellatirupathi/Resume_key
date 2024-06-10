@@ -26,7 +26,7 @@ st.set_page_config(
 )
 
 # Create an iframe to embed the Flask app
-public_flask_url = "http://192.168.1.17:8000"  # Use localhost for local testing, replace with server address for deployment
+public_flask_url = "http://192.168.1.17:8501:8000"  # Use localhost for local testing, replace with server address for deployment
 st.markdown(f'''
     <style>
     .full-screen-frame {{
