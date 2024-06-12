@@ -1,3 +1,4 @@
+import logging
 from flask import Flask, request, jsonify, render_template
 import requests
 from PyPDF2 import PdfReader, errors
@@ -8,9 +9,11 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import time
 
 app = Flask(__name__)
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
 
 # Google Sheets API setup
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
@@ -35,7 +38,7 @@ def download_pdf(url):
         response.raise_for_status()
         return BytesIO(response.content)
     except requests.RequestException as e:
-        print(f"Error downloading PDF from {url}: {e}")
+        logging.error(f"Error downloading PDF from {url}: {e}")
         return None
 
 def extract_text_from_pdf(pdf_file):
@@ -46,7 +49,7 @@ def extract_text_from_pdf(pdf_file):
             text += page.extract_text()
         return text
     except errors.PdfReadError as e:
-        print(f"Error reading PDF file: {e}")
+        logging.error(f"Error reading PDF file: {e}")
         return ""
 
 def process_pdf(entry, keywords, total_keywords):
@@ -84,19 +87,18 @@ def process_pdf(entry, keywords, total_keywords):
 def search_keyword_in_pdfs(data, keywords):
     matched_entries = []
     total_keywords = len(keywords)
-
-    # Process PDFs in batches
+    
     batch_size = 10  # Number of PDFs to process concurrently
     for i in range(0, len(data), batch_size):
         batch = data[i:i + batch_size]
-        with ThreadPoolExecutor(max_workers=10) as executor:  # Reduced max_workers for better stability
+        logging.info(f"Processing batch {i//batch_size + 1}/{(len(data) + batch_size - 1)//batch_size}")
+        with ThreadPoolExecutor(max_workers=10) as executor:
             futures = [executor.submit(process_pdf, entry, keywords, total_keywords) for entry in batch]
             for future in as_completed(futures):
                 result = future.result()
                 if result:
                     matched_entries.append(result)
-        time.sleep(1)  # Sleep between batches to reduce load
-
+    
     matched_entries.sort(key=lambda x: x['percentage'], reverse=True)
     return matched_entries
 
