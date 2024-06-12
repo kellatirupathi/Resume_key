@@ -1,17 +1,13 @@
 import logging
-import gc
 from flask import Flask, request, jsonify, render_template
-import requests
-from PyPDF2 import PdfReader, errors
-from io import BytesIO
 import csv
-import re
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from celery.result import AsyncResult
+from celery_worker import app as celery_app, process_pdf
 
-app = Flask(__name__)
+flask_app = Flask(__name__)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -24,93 +20,11 @@ credentials = service_account.Credentials.from_service_account_file(
     SERVICE_ACCOUNT_FILE, scopes=SCOPES)
 spreadsheet_id = '1v4FnbxnHkUIG0MSo3aHRFFAVHa4l51hcXF_YlLq6PaI'  # Replace with your Google Spreadsheet ID
 
-# List of all possible technologies to check for in the resumes
-ALL_TECHNOLOGIES = [
-    'Python', 'Java', 'JavaScript', 'C#', 'C++', 'SQL', 'React.js', 'Node.js', 'HTML', 'CSS', 'Bootstrap', 'Express',
-    'SQLite', 'Flexbox', 'MongoDB', 'OOPs', 'Redux', 'Git', 'SpringBoot', 'Data', 'Analytics', 'Manual', 'Testing',
-    'Selenium', 'Testing', 'User', 'Interface', 'UI', 'XR', 'AI', 'ML', 'AWS', 'Cyber', 'Security', 'Data', 'Structures',
-    'Algorithms', 'Django', 'Flask', 'Linux', 'NumPy', 'SAP', 'AngularJS', 'Flutter', 'UX', 'design', 'jQuery', 'Angular',
-    'REST', 'API', 'Calls', 'node', 'Nodejs', 'Reactjs', 'Rails', 'Vue', 'WordPress', 'Science', 'AR', 'VR', 'MR', 'Next.js', 'Nexjs', 'Kubernetes', 'Microsoft', 'Azure', 'DevOps'
-]  # Add more as needed
-
-def download_pdf(url):
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        return BytesIO(response.content)
-    except requests.RequestException as e:
-        logging.error(f"Error downloading PDF from {url}: {e}")
-        return None
-
-def extract_text_from_pdf(pdf_file):
-    try:
-        pdf_reader = PdfReader(pdf_file)
-        text = ""
-        for page in pdf_reader.pages:
-            text += page.extract_text()
-        return text
-    except errors.PdfReadError as e:
-        logging.error(f"Error reading PDF file: {e}")
-        return ""
-
-def process_pdf(entry, keywords, total_keywords):
-    url = entry['resume_link']
-    user_id = entry['user_id']
-    pdf_file = download_pdf(url)
-    if not pdf_file:
-        return None  # Skip if the PDF could not be downloaded
-    
-    text = extract_text_from_pdf(pdf_file)
-    if not text:
-        return None  # Skip if the text could not be extracted
-    
-    match_count = 0
-    matched_technologies = []
-    existing_technologies = [tech for tech in ALL_TECHNOLOGIES if re.search(r'\b' + re.escape(tech) + r'\b', text, re.IGNORECASE)]
-    
-    for keyword in keywords:
-        pattern = r'\b' + re.escape(keyword).replace(' ', r'\s+') + r'\b'
-        if re.search(pattern, text, re.IGNORECASE):
-            match_count += 1
-            matched_technologies.append(keyword)
-    
-    if match_count > 0:
-        percentage = (match_count / total_keywords) * 100
-        return {
-            'user_id': user_id,
-            'resume_link': url,
-            'percentage': round(percentage, 2),
-            'matched_technologies': matched_technologies,
-            'existing_technologies': existing_technologies
-        }
-    return None
-
-def search_keyword_in_pdfs(data, keywords):
-    matched_entries = []
-    total_keywords = len(keywords)
-    
-    batch_size = 5  # Number of PDFs to process concurrently
-    for i in range(0, len(data), batch_size):
-        batch = data[i:i + batch_size]
-        logging.info(f"Processing batch {i//batch_size + 1}/{(len(data) + batch_size - 1)//batch_size}")
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = [executor.submit(process_pdf, entry, keywords, total_keywords) for entry in batch]
-            for future in as_completed(futures):
-                result = future.result()
-                if result:
-                    matched_entries.append(result)
-        
-        # Force garbage collection to free up memory
-        gc.collect()
-    
-    matched_entries.sort(key=lambda x: x['percentage'], reverse=True)
-    return matched_entries
-
-@app.route('/')
+@flask_app.route('/')
 def index():
     return render_template('index.html')
 
-@app.route('/upload_csv', methods=['POST'])
+@flask_app.route('/upload_csv', methods=['POST'])
 def upload_csv():
     if 'file' not in request.files:
         return jsonify({'error': 'No file part'}), 400
@@ -128,16 +42,43 @@ def upload_csv():
     else:
         return jsonify({'error': 'File type not allowed'}), 400
 
-@app.route('/search_keyword', methods=['POST'])
+@flask_app.route('/search_keyword', methods=['POST'])
 def search_keyword():
     data = request.json.get('data')
     keywords = request.json.get('keywords')
     if not keywords or not data:
         return jsonify({'error': 'Keywords and PDF URLs are required'}), 400
-    matched_entries = search_keyword_in_pdfs(data, keywords)
-    return jsonify(matched_entries), 200
 
-@app.route('/save_results', methods=['POST'])
+    total_keywords = len(keywords)
+    task_ids = []
+
+    for entry in data:
+        task = process_pdf.apply_async(args=[entry, keywords, total_keywords])
+        task_ids.append(task.id)
+
+    return jsonify({'task_ids': task_ids}), 200
+
+@flask_app.route('/task_status/<task_id>', methods=['GET'])
+def task_status(task_id):
+    task = AsyncResult(task_id, app=celery_app)
+    if task.state == 'PENDING':
+        response = {
+            'state': task.state,
+            'status': 'Pending...'
+        }
+    elif task.state != 'FAILURE':
+        response = {
+            'state': task.state,
+            'status': task.info,
+        }
+    else:
+        response = {
+            'state': task.state,
+            'status': str(task.info),  # this is the exception raised
+        }
+    return jsonify(response)
+
+@flask_app.route('/save_results', methods=['POST'])
 def save_results():
     results = request.json.get('results')
     if not results:
@@ -209,4 +150,4 @@ def save_results():
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8000, debug=True)
+    flask_app.run(host='0.0.0.0', port=8000, debug=True)
