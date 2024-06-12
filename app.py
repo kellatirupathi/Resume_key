@@ -8,6 +8,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
 
 app = Flask(__name__)
 
@@ -83,14 +84,19 @@ def process_pdf(entry, keywords, total_keywords):
 def search_keyword_in_pdfs(data, keywords):
     matched_entries = []
     total_keywords = len(keywords)
-    
-    with ThreadPoolExecutor(max_workers=50) as executor:  # Reduced max_workers for better stability
-        futures = [executor.submit(process_pdf, entry, keywords, total_keywords) for entry in data]
-        for future in as_completed(futures):
-            result = future.result()
-            if result:
-                matched_entries.append(result)
-    
+
+    # Process PDFs in batches
+    batch_size = 10  # Number of PDFs to process concurrently
+    for i in range(0, len(data), batch_size):
+        batch = data[i:i + batch_size]
+        with ThreadPoolExecutor(max_workers=10) as executor:  # Reduced max_workers for better stability
+            futures = [executor.submit(process_pdf, entry, keywords, total_keywords) for entry in batch]
+            for future in as_completed(futures):
+                result = future.result()
+                if result:
+                    matched_entries.append(result)
+        time.sleep(1)  # Sleep between batches to reduce load
+
     matched_entries.sort(key=lambda x: x['percentage'], reverse=True)
     return matched_entries
 
