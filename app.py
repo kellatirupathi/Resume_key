@@ -2,7 +2,7 @@ import logging
 import gc
 from flask import Flask, request, jsonify, render_template
 import requests
-from PyPDF2 import PdfReader, errors
+from PyPDF2 import PdfFileReader, PdfReadError  # Updated import
 from io import BytesIO
 import csv
 import re
@@ -43,12 +43,12 @@ def download_pdf(url):
 
 def extract_text_from_pdf(pdf_file):
     try:
-        pdf_reader = PdfReader(pdf_file)
+        pdf_reader = PdfFileReader(pdf_file)  # Updated class name
         text = ""
-        for page in pdf_reader.pages:
-            text += page.extract_text()
+        for page_num in range(pdf_reader.getNumPages()):
+            text += pdf_reader.getPage(page_num).extract_text()
         return text
-    except errors.PdfReadError as e:
+    except PdfReadError as e:
         logging.error(f"Error reading PDF file: {e}")
         return ""
 
