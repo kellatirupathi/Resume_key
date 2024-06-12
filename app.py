@@ -23,7 +23,7 @@ spreadsheet_id = '1v4FnbxnHkUIG0MSo3aHRFFAVHa4l51hcXF_YlLq6PaI'  # Replace with 
 ALL_TECHNOLOGIES = [
     'Python', 'Java', 'JavaScript', 'C#', 'C++', 'SQL', 'React.js', 'Node.js', 'HTML', 'CSS', 'Bootstrap', 'Express',
     'SQLite', 'Flexbox', 'MongoDB', 'OOPs', 'Redux', 'Git', 'SpringBoot', 'Data', 'Analytics', 'Manual', 'Testing',
-    'Selenium', 'Testing', 'User', 'Interface', 'UI' 'XR', 'AI', 'ML', 'AWS', 'Cyber', 'Security', 'Data', 'Structures',
+    'Selenium', 'Testing', 'User', 'Interface', 'UI', 'XR', 'AI', 'ML', 'AWS', 'Cyber', 'Security', 'Data', 'Structures',
     'Algorithms', 'Django', 'Flask', 'Linux', 'NumPy', 'SAP', 'AngularJS', 'Flutter', 'UX', 'design', 'jQuery', 'Angular',
     'REST', 'API', 'Calls', 'node', 'Nodejs', 'Reactjs', 'Rails', 'Vue', 'WordPress', 'Science', 'AR', 'VR', 'MR', 'Next.js', 'Nexjs', 'Kubernetes', 'Microsoft', 'Azure', 'DevOps'
 ]  # Add more as needed
@@ -84,7 +84,7 @@ def search_keyword_in_pdfs(data, keywords):
     matched_entries = []
     total_keywords = len(keywords)
     
-    with ThreadPoolExecutor(max_workers=500) as executor:  # Adjust max_workers based on your server capacity
+    with ThreadPoolExecutor(max_workers=50) as executor:  # Reduced max_workers for better stability
         futures = [executor.submit(process_pdf, entry, keywords, total_keywords) for entry in data]
         for future in as_completed(futures):
             result = future.result()
@@ -135,13 +135,15 @@ def save_results():
         service = build('sheets', 'v4', credentials=credentials)
         sheet = service.spreadsheets()
 
-        values = [['Timestamp', 'User ID', 'Resume Link', 'Percentage', 'Matched Technologies', 'Existing Technologies']]
+        values = [['Timestamp', 'User ID', 'Resume Link', 'Checked', 'Percentage', 'Matched Technologies', 'Existing Technologies']]
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         for result in results:
+            checked = 'Yes' if result['checked'] else 'No'
             values.append([
                 timestamp, 
                 result['user_id'], 
                 result['resume_link'], 
+                checked,
                 result['percentage'], 
                 ', '.join(result['matched_technologies']),
                 ', '.join(result['existing_technologies'])
@@ -151,13 +153,44 @@ def save_results():
             'values': values
         }
 
-        result = sheet.values().append(
+        append_result = sheet.values().append(
             spreadsheetId=spreadsheet_id,
             range='Sheet1!A1',
             valueInputOption='RAW',
             insertDataOption='INSERT_ROWS',
             body=body
         ).execute()
+
+        # Calculate the range to update formatting
+        start_row = append_result['updates']['updatedRange'].split('!')[1].split(':')[0][1:]
+        end_row = append_result['updates']['updatedRows'] + int(start_row) - 1
+        range_to_format = f'Sheet1!A{start_row}:G{end_row}'
+
+        # Remove bold formatting
+        requests = [{
+            'repeatCell': {
+                'range': {
+                    'startRowIndex': int(start_row) - 1,
+                    'endRowIndex': end_row,
+                    'startColumnIndex': 0,
+                    'endColumnIndex': 7
+                },
+                'cell': {
+                    'userEnteredFormat': {
+                        'textFormat': {
+                            'bold': False
+                        }
+                    }
+                },
+                'fields': 'userEnteredFormat.textFormat.bold'
+            }
+        }]
+
+        body = {
+            'requests': requests
+        }
+
+        sheet.batchUpdate(spreadsheetId=spreadsheet_id, body=body).execute()
 
         return jsonify({'status': 'success'}), 200
     except Exception as e:
