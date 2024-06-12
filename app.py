@@ -1,4 +1,5 @@
 import logging
+import gc
 from flask import Flask, request, jsonify, render_template
 import requests
 from PyPDF2 import PdfReader, errors
@@ -88,16 +89,19 @@ def search_keyword_in_pdfs(data, keywords):
     matched_entries = []
     total_keywords = len(keywords)
     
-    batch_size = 10  # Number of PDFs to process concurrently
+    batch_size = 5  # Number of PDFs to process concurrently
     for i in range(0, len(data), batch_size):
         batch = data[i:i + batch_size]
         logging.info(f"Processing batch {i//batch_size + 1}/{(len(data) + batch_size - 1)//batch_size}")
-        with ThreadPoolExecutor(max_workers=10) as executor:
+        with ThreadPoolExecutor(max_workers=5) as executor:
             futures = [executor.submit(process_pdf, entry, keywords, total_keywords) for entry in batch]
             for future in as_completed(futures):
                 result = future.result()
                 if result:
                     matched_entries.append(result)
+        
+        # Force garbage collection to free up memory
+        gc.collect()
     
     matched_entries.sort(key=lambda x: x['percentage'], reverse=True)
     return matched_entries
