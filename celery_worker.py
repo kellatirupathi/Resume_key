@@ -4,11 +4,15 @@ from PyPDF2 import PdfReader, errors
 from io import BytesIO
 import re
 import logging
+import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 
-app = Celery('tasks', broker='redis://localhost:6379/0')
+# Get Redis URL from environment variables
+redis_url = os.getenv('REDIS_URL', 'redis://red-cpl0d6ol6cac73als9s0:6379')
+
+app = Celery('tasks', broker=redis_url)
 
 # List of all possible technologies to check for in the resumes
 ALL_TECHNOLOGIES = [
