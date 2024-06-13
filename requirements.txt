@@ -1,8 +1,7 @@
-flask
-requests
-PyPDF2
-google-auth
-google-auth-oauthlib
-google-auth-httplib2
-google-api-python-client
-streamlit
+Flask==2.0.1
+gunicorn==20.1.0
+requests==2.26.0
+PyPDF2==1.26.0
+google-auth==2.0.2
+google-auth-oauthlib==0.4.6
+google-api-python-client==2.19.0
