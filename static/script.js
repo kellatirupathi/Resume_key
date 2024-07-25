@@ -239,6 +239,9 @@ function startSearchTimer(estimatedTime) {
                     </div>
                     <div class="time" >Estimated Time: <span id="timer">${estimatedTime}</span> seconds</div>
                 </div>
+                <div class="progress-container">
+                    <progress id="progressBar" value="0" max="100"></progress>
+                </div>
             </td>
         </tr>`;
     let timer = estimatedTime;
@@ -249,8 +252,19 @@ function startSearchTimer(estimatedTime) {
         }
         document.getElementById('timer').textContent = timer;
     }, 1000);
+
+    let progressBar = document.getElementById('progressBar');
+    let progressInterval = setInterval(() => {
+        let progressValue = ((estimatedTime - timer) / estimatedTime) * 100;
+        progressBar.value = progressValue;
+        if (progressValue >= 100) {
+            clearInterval(progressInterval);
+        }
+    }, 1000);
 }
 
 function stopSearchTimer() {
     clearInterval(window.searchTimer);
+    let progressBar = document.getElementById('progressBar');
+    progressBar.value = 100;
 }
