@@ -8,7 +8,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from celery import Celery
+from celery_app import make_celery  # Import from celery_app.py
 
 app = Flask(__name__)
 app.config['CELERY_BROKER_URL'] = 'redis://localhost:6379/0'
