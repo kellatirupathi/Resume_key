@@ -8,32 +8,8 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from celery import Celery
 
 app = Flask(__name__)
-
-# Celery configuration
-app.config['CELERY_BROKER_URL'] = 'redis://localhost:6379/0'
-app.config['CELERY_RESULT_BACKEND'] = 'redis://localhost:6379/0'
-
-def make_celery(app):
-    celery = Celery(
-        app.import_name,
-        backend=app.config['CELERY_RESULT_BACKEND'],
-        broker=app.config['CELERY_BROKER_URL']
-    )
-    celery.conf.update(app.config)
-    TaskBase = celery.Task
-
-    class ContextTask(TaskBase):
-        def __call__(self, *args, **kwargs):
-            with app.app_context():
-                return TaskBase.__call__(self, *args, **kwargs)
-
-    celery.Task = ContextTask
-    return celery
-
-celery = make_celery(app)
 
 # Google Sheets API setup
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
@@ -63,10 +39,9 @@ def download_pdf(url):
     try:
         response = requests.get(url)
         response.raise_for_status()
-        logging.info(f"Successfully downloaded PDF from {url}")
         return BytesIO(response.content)
     except requests.RequestException as e:
-        logging.error(f"Error downloading PDF from {url}: {e}")
+        print(f"Error downloading PDF from {url}: {e}")
         return None
 
 def extract_text_from_pdf(pdf_file):
@@ -77,26 +52,23 @@ def extract_text_from_pdf(pdf_file):
             page_text = page.extract_text()
             if page_text:
                 text += page_text
-        logging.info("Successfully extracted text from PDF")
         return text
     except errors.PdfReadError as e:
-        logging.error(f"Error reading PDF file: {e}")
+        print(f"Error reading PDF file: {e}")
         return ""
     except Exception as e:
-        logging.error(f"Unexpected error while reading PDF: {e}")
+        print(f"Unexpected error while reading PDF: {e}")
         return ""
 
 def process_pdf(entry, keywords, total_keywords):
-    logging.info(f"Processing PDF for user_id: {entry['user_id']}")
     url = entry['resume_link']
+    user_id = entry['user_id']
     pdf_file = download_pdf(url)
     if not pdf_file:
-        logging.warning(f"Skipping PDF for user_id: {entry['user_id']} - download failed")
         return None  # Skip if the PDF could not be downloaded
     
     text = extract_text_from_pdf(pdf_file)
     if not text:
-        logging.warning(f"Skipping PDF for user_id: {entry['user_id']} - text extraction failed")
         return None  # Skip if the text could not be extracted
     
     match_count = 0
@@ -111,7 +83,6 @@ def process_pdf(entry, keywords, total_keywords):
     
     if match_count > 0:
         percentage = (match_count / total_keywords) * 100
-        logging.info(f"Match found for user_id: {entry['user_id']} - {match_count} matches, {percentage}%")
         return {
             'user_id': user_id,
             'resume_link': url,
@@ -119,12 +90,7 @@ def process_pdf(entry, keywords, total_keywords):
             'matched_technologies': matched_technologies,
             'existing_technologies': existing_technologies
         }
-    logging.info(f"No matches found for user_id: {entry['user_id']}")
     return None
-
-@celery.task
-def process_pdf_task(entry, keywords, total_keywords):
-    return process_pdf(entry, keywords, total_keywords)
 
 def search_keyword_in_pdfs(data, keywords):
     matched_entries = []
@@ -133,12 +99,9 @@ def search_keyword_in_pdfs(data, keywords):
     with ThreadPoolExecutor(max_workers=300) as executor:  # Adjust max_workers based on your server capacity
         futures = [executor.submit(process_pdf, entry, keywords, total_keywords) for entry in data]
         for future in as_completed(futures):
-            try:
-                result = future.result()
-                if result:
-                    matched_entries.append(result)
-            except Exception as e:
-                logging.error(f"Error processing PDF: {e}")
+            result = future.result()
+            if result:
+                matched_entries.append(result)
     
     matched_entries.sort(key=lambda x: x['percentage'], reverse=True)
     return matched_entries
@@ -171,10 +134,7 @@ def search_keyword():
     keywords = request.json.get('keywords')
     if not keywords or not data:
         return jsonify({'error': 'Keywords and PDF URLs are required'}), 400
-    total_keywords = len(keywords)
-    futures = [process_pdf_task.delay(entry, keywords, total_keywords) for entry in data]
-    matched_entries = [future.get() for future in futures if future.get()]
-    matched_entries.sort(key=lambda x: x['percentage'], reverse=True)
+    matched_entries = search_keyword_in_pdfs(data, keywords)
     return jsonify(matched_entries), 200
 
 @app.route('/save_results', methods=['POST'])
