@@ -1,7 +1,6 @@
-import logging
 from flask import Flask, request, jsonify, render_template
 import requests
-from PyPDF2 import PdfReader
+from PyPDF2 import PdfReader, errors
 from io import BytesIO
 import csv
 import re
@@ -11,9 +10,6 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 app = Flask(__name__)
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 
 # Google Sheets API setup
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
@@ -32,13 +28,20 @@ ALL_TECHNOLOGIES = [
     'REST', 'API', 'Calls', 'node', 'Nodejs', 'Reactjs', 'Rails', 'Vue', 'WordPress', 'Science', 'AR', 'VR', 'MR', 'Next.js', 'Nexjs', 'Kubernetes', 'Microsoft', 'Azure', 'DevOps'
 ]  # Add more as needed
 
+def convert_drive_url_to_direct(url):
+    match = re.match(r'https://drive\.google\.com/file/d/([^/]+)/view', url)
+    if match:
+        return f'https://drive.google.com/uc?id={match.group(1)}&export=download'
+    return url
+
 def download_pdf(url):
+    url = convert_drive_url_to_direct(url)
     try:
         response = requests.get(url)
         response.raise_for_status()
         return BytesIO(response.content)
     except requests.RequestException as e:
-        logging.error(f"Error downloading PDF from {url}: {e}")
+        print(f"Error downloading PDF from {url}: {e}")
         return None
 
 def extract_text_from_pdf(pdf_file):
@@ -46,10 +49,15 @@ def extract_text_from_pdf(pdf_file):
         pdf_reader = PdfReader(pdf_file)
         text = ""
         for page in pdf_reader.pages:
-            text += page.extract_text()
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text
         return text
+    except errors.PdfReadError as e:
+        print(f"Error reading PDF file: {e}")
+        return ""
     except Exception as e:
-        logging.error(f"Error reading PDF file: {e}")
+        print(f"Unexpected error while reading PDF: {e}")
         return ""
 
 def process_pdf(entry, keywords, total_keywords):
@@ -88,7 +96,7 @@ def search_keyword_in_pdfs(data, keywords):
     matched_entries = []
     total_keywords = len(keywords)
     
-    with ThreadPoolExecutor(max_workers=10) as executor:  # Adjust max_workers based on your server capacity
+    with ThreadPoolExecutor(max_workers=300) as executor:  # Adjust max_workers based on your server capacity
         futures = [executor.submit(process_pdf, entry, keywords, total_keywords) for entry in data]
         for future in as_completed(futures):
             result = future.result()
