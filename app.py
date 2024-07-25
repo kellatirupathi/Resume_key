@@ -8,13 +8,8 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from celery_app import make_celery  # Import from celery_app.py
 
 app = Flask(__name__)
-app.config['CELERY_BROKER_URL'] = 'redis://localhost:6379/0'
-app.config['CELERY_RESULT_BACKEND'] = 'redis://localhost:6379/0'
-
-celery = make_celery(app)
 
 # Google Sheets API setup
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
@@ -65,7 +60,6 @@ def extract_text_from_pdf(pdf_file):
         print(f"Unexpected error while reading PDF: {e}")
         return ""
 
-@celery.task()
 def process_pdf(entry, keywords, total_keywords):
     url = entry['resume_link']
     user_id = entry['user_id']
@@ -140,14 +134,8 @@ def search_keyword():
     keywords = request.json.get('keywords')
     if not keywords or not data:
         return jsonify({'error': 'Keywords and PDF URLs are required'}), 400
-    
-    tasks = []
-    total_keywords = len(keywords)
-    for entry in data:
-        task = process_pdf.delay(entry, keywords, total_keywords)
-        tasks.append(task.id)
-
-    return jsonify({'tasks': tasks}), 200
+    matched_entries = search_keyword_in_pdfs(data, keywords)
+    return jsonify(matched_entries), 200
 
 @app.route('/save_results', methods=['POST'])
 def save_results():
@@ -221,5 +209,4 @@ def save_results():
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    from gunicorn.app.wsgiapp import run
-    run()
+    app.run(host='0.0.0.0', port=8000, debug=True)
