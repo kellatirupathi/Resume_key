@@ -8,10 +8,6 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import logging
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 
 app = Flask(__name__)
 
@@ -100,7 +96,7 @@ def search_keyword_in_pdfs(data, keywords):
     matched_entries = []
     total_keywords = len(keywords)
     
-    with ThreadPoolExecutor(max_workers=30) as executor:  # Adjust max_workers based on your server capacity
+    with ThreadPoolExecutor(max_workers=300) as executor:  # Adjust max_workers based on your server capacity
         futures = [executor.submit(process_pdf, entry, keywords, total_keywords) for entry in data]
         for future in as_completed(futures):
             result = future.result()
@@ -117,29 +113,19 @@ def index():
 @app.route('/upload_csv', methods=['POST'])
 def upload_csv():
     if 'file' not in request.files:
-        logging.error("No file part in request")
         return jsonify({'error': 'No file part'}), 400
-    
     file = request.files['file']
     if file.filename == '':
-        logging.error("No selected file")
         return jsonify({'error': 'No selected file'}), 400
-    
     if file and file.filename.endswith('.csv'):
-        try:
-            data = []
-            stream = file.stream.read().decode("UTF8")
-            csv_reader = csv.reader(stream.splitlines())
-            for row in csv_reader:
-                if row:  # skip empty rows
-                    data.append({'user_id': row[0], 'resume_link': row[1]})
-            logging.info(f"Successfully processed CSV file with {len(data)} rows")
-            return jsonify(data), 200
-        except Exception as e:
-            logging.error(f"Error processing CSV file: {str(e)}")
-            return jsonify({'error': f'Error processing CSV file: {str(e)}'}), 500
+        data = []
+        stream = file.stream.read().decode("UTF8")
+        csv_reader = csv.reader(stream.splitlines())
+        for row in csv_reader:
+            if row:  # skip empty rows
+                data.append({'user_id': row[0], 'resume_link': row[1]})
+        return jsonify(data), 200
     else:
-        logging.error("File type not allowed")
         return jsonify({'error': 'File type not allowed'}), 400
 
 @app.route('/search_keyword', methods=['POST'])
