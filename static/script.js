@@ -1,270 +1,212 @@
-document.getElementById('uploadButton').addEventListener('click', () => {
-    const fileInput = document.getElementById('fileInput');
-    const file = fileInput.files[0];
+from flask import Flask, request, jsonify, render_template
+import requests
+from PyPDF2 import PdfReader, errors
+from io import BytesIO
+import csv
+import re
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    if (file && file.type === 'text/csv') {
-        const formData = new FormData();
-        formData.append('file', file);
+app = Flask(__name__)
 
-        fetch('/upload_csv', {
-            method: 'POST',
-            body: formData,
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.error) {
-                antd.notification.error({
-                    message: 'Error',
-                    description: data.error,
-                    duration: 1,
-                });
-            } else {
-                displayCSVData(data);
-                updateUploadCount(data.length); // Update the count of uploaded user IDs
-            }
-        })
-        .catch(error => console.error('Error:', error));
-    } else {
-        antd.notification.warning({
-            message: 'Warning',
-            description: 'Please upload a valid CSV file.',
-            duration: 1,
-        });
-    }
-});
+# Google Sheets API setup
+SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
+SERVICE_ACCOUNT_FILE = 'credentials.json'  # Path to your credentials file
 
-document.getElementById('searchButton').addEventListener('click', () => {
-    triggerSearch();
-});
+credentials = service_account.Credentials.from_service_account_file(
+    SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+spreadsheet_id = '1v4FnbxnHkUIG0MSo3aHRFFAVHa4l51hcXF_YlLq6PaI'  # Replace with your Google Spreadsheet ID
 
-document.getElementById('keywordInput').addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') {
-        event.preventDefault();
-        triggerSearch();
-    }
-});
+# List of all possible technologies to check for in the resumes
+ALL_TECHNOLOGIES = [
+    'Python', 'Java', 'JavaScript', 'C#', 'C++', 'SQL', 'React.js', 'Node.js', 'HTML', 'CSS', 'Bootstrap', 'Express',
+    'SQLite', 'Flexbox', 'MongoDB', 'OOPs', 'Redux', 'Git', 'SpringBoot', 'Data', 'Analytics', 'Manual', 'Testing',
+    'Selenium', 'Testing', 'User', 'Interface', 'UI', 'XR', 'AI', 'ML', 'AWS', 'Cyber', 'Security', 'Data', 'Structures',
+    'Algorithms', 'Django', 'Flask', 'Linux', 'NumPy', 'SAP', 'AngularJS', 'Flutter', 'UX', 'design', 'jQuery', 'Angular',
+    'REST', 'API', 'Calls', 'node', 'Nodejs', 'Reactjs', 'Rails', 'Vue', 'WordPress', 'Science', 'AR', 'VR', 'MR', 'Next.js', 'Nexjs', 'Kubernetes', 'Microsoft', 'Azure', 'DevOps'
+]  # Add more as needed
 
-document.getElementById('saveButton').addEventListener('click', () => {
-    saveResultsToGoogleSheet();
-});
+def convert_drive_url_to_direct(url):
+    match = re.match(r'https://drive\.google\.com/file/d/([^/]+)/view', url)
+    if match:
+        return f'https://drive.google.com/uc?id={match.group(1)}&export=download'
+    return url
 
-function triggerSearch() {
-    const keywordInput = document.getElementById('keywordInput').value.trim();
-    const keywords = keywordInput.split(',').map(kw => kw.trim()).filter(kw => kw !== "");
-    const pdfData = Array.from(document.querySelectorAll('#dataTable tbody tr')).map(row => {
+def download_pdf(url):
+    url = convert_drive_url_to_direct(url)
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        return BytesIO(response.content)
+    except requests.RequestException as e:
+        print(f"Error downloading PDF from {url}: {e}")
+        return None
+
+def extract_text_from_pdf(pdf_file):
+    try:
+        pdf_reader = PdfReader(pdf_file)
+        text = ""
+        for page in pdf_reader.pages:
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text
+        return text
+    except errors.PdfReadError as e:
+        print(f"Error reading PDF file: {e}")
+        return ""
+    except Exception as e:
+        print(f"Unexpected error while reading PDF: {e}")
+        return ""
+
+def process_pdf(entry, keywords, total_keywords):
+    url = entry['resume_link']
+    user_id = entry['user_id']
+    pdf_file = download_pdf(url)
+    if not pdf_file:
+        return None  # Skip if the PDF could not be downloaded
+    
+    text = extract_text_from_pdf(pdf_file)
+    if not text:
+        return None  # Skip if the text could not be extracted
+    
+    match_count = 0
+    matched_technologies = []
+    existing_technologies = [tech for tech in ALL_TECHNOLOGIES if re.search(r'\b' + re.escape(tech) + r'\b', text, re.IGNORECASE)]
+    
+    for keyword in keywords:
+        pattern = r'\b' + re.escape(keyword).replace(' ', r'\s+') + r'\b'
+        if re.search(pattern, text, re.IGNORECASE):
+            match_count += 1
+            matched_technologies.append(keyword)
+    
+    if match_count > 0:
+        percentage = (match_count / total_keywords) * 100
         return {
-            user_id: row.cells[0].innerText,
-            resume_link: row.cells[1].querySelector('a').href // Retrieve the actual link from the anchor tag
-        };
-    });
+            'user_id': user_id,
+            'resume_link': url,
+            'percentage': round(percentage, 2),
+            'matched_technologies': matched_technologies,
+            'existing_technologies': existing_technologies
+        }
+    return None
 
-    if (keywords.length > 0 && pdfData.length > 0) {
-        const estimatedTime = calculateEstimatedTime(pdfData.length); // Estimate the search time based on the number of PDFs
-        startSearchTimer(estimatedTime); // Start the timer with the estimated time
-        fetch('/search_keyword', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ keywords, data: pdfData }),
-        })
-        .then(response => response.json())
-        .then(data => {
-            stopSearchTimer(); // Stop the timer
-            if (data.error) {
-                antd.notification.error({
-                    message: 'Error',
-                    description: data.error,
-                    duration: 1,
-                });
-            } else {
-                displayMatchedResumes(data, keywordInput);
-                updateSearchCount(data.length); // Update the count of matched user IDs
+def search_keyword_in_pdfs(data, keywords):
+    matched_entries = []
+    total_keywords = len(keywords)
+    
+    with ThreadPoolExecutor(max_workers=300) as executor:  # Adjust max_workers based on your server capacity
+        futures = [executor.submit(process_pdf, entry, keywords, total_keywords) for entry in data]
+        for future in as_completed(futures):
+            result = future.result()
+            if result:
+                matched_entries.append(result)
+    
+    matched_entries.sort(key=lambda x: x['percentage'], reverse=True)
+    return matched_entries
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/upload_csv', methods=['POST'])
+def upload_csv():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part'}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'}), 400
+    if file and file.filename.endswith('.csv'):
+        data = []
+        stream = file.stream.read().decode("UTF8")
+        csv_reader = csv.reader(stream.splitlines())
+        for row in csv_reader:
+            if row:  # skip empty rows
+                data.append({'user_id': row[0], 'resume_link': row[1]})
+        return jsonify(data), 200
+    else:
+        return jsonify({'error': 'File type not allowed'}), 400
+
+@app.route('/search_keyword', methods=['POST'])
+def search_keyword():
+    data = request.json.get('data')
+    keywords = request.json.get('keywords')
+    if not keywords or not data:
+        return jsonify({'error': 'Keywords and PDF URLs are required'}), 400
+    matched_entries = search_keyword_in_pdfs(data, keywords)
+    return jsonify(matched_entries), 200
+
+@app.route('/save_results', methods=['POST'])
+def save_results():
+    results = request.json.get('results')
+    if not results:
+        return jsonify({'error': 'No results to save'}), 400
+
+    try:
+        service = build('sheets', 'v4', credentials=credentials)
+        sheet = service.spreadsheets()
+
+        values = [['Timestamp', 'User ID', 'Resume Link', 'Checked', 'Percentage', 'Matched Technologies', 'Existing Technologies']]
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        for result in results:
+            checked = 'Yes' if result['checked'] else 'No'
+            values.append([
+                timestamp, 
+                result['user_id'], 
+                result['resume_link'], 
+                checked,
+                result['percentage'], 
+                ', '.join(result['matched_technologies']),
+                ', '.join(result['existing_technologies'])
+            ])
+
+        body = {
+            'values': values
+        }
+
+        append_result = sheet.values().append(
+            spreadsheetId=spreadsheet_id,
+            range='Sheet1!A1',
+            valueInputOption='RAW',
+            insertDataOption='INSERT_ROWS',
+            body=body
+        ).execute()
+
+        # Calculate the range to update formatting
+        start_row = append_result['updates']['updatedRange'].split('!')[1].split(':')[0][1:]
+        end_row = append_result['updates']['updatedRows'] + int(start_row) - 1
+        range_to_format = f'Sheet1!A{start_row}:G{end_row}'
+
+        # Remove bold formatting
+        requests = [{
+            'repeatCell': {
+                'range': {
+                    'startRowIndex': int(start_row) - 1,
+                    'endRowIndex': end_row,
+                    'startColumnIndex': 0,
+                    'endColumnIndex': 7
+                },
+                'cell': {
+                    'userEnteredFormat': {
+                        'textFormat': {
+                            'bold': False
+                        }
+                    }
+                },
+                'fields': 'userEnteredFormat.textFormat.bold'
             }
-        })
-        .catch(error => {
-            stopSearchTimer(); // Stop the timer on error
-            console.error('Error:', error);
-        });
-    } else {
-        antd.notification.warning({
-            message: 'Warning',
-            description: 'Please enter keywords and ensure there are resume links uploaded.',
-            duration: 1,
-        });
-    }
-}
+        }]
 
-function saveResultsToGoogleSheet() {
-    const results = Array.from(document.querySelectorAll('#resultTable tbody tr')).map(row => {
-        return {
-            user_id: row.cells[2].innerText,
-            resume_link: row.cells[1].querySelector('a').href, // Retrieve the actual link from the anchor tag
-            checked: row.cells[0].querySelector('input[type="checkbox"]').checked,
-            percentage: row.cells[3].innerText, // Get the percentage value
-            matched_technologies: row.cells[4].innerText.split(', '), // Get the matched technologies
-            existing_technologies: row.cells[5].innerText.split(', ')  // Get the existing technologies
-        };
-    });
-
-    fetch('/save_results', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ results }),
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.error) {
-            antd.notification.error({
-                message: 'Error',
-                description: data.error,
-                duration: 1,
-            });
-        } else {
-            antd.notification.success({
-                message: 'Success',
-                description: 'Results saved to Google Spreadsheet.',
-                duration: 1,
-            });
+        body = {
+            'requests': requests
         }
-    })
-    .catch(error => console.error('Error:', error));
-}
 
-function displayCSVData(data) {
-    const tableBody = document.querySelector('#dataTable tbody');
-    tableBody.innerHTML = '';  // Clear any existing rows
+        sheet.batchUpdate(spreadsheetId=spreadsheet_id, body=body).execute()
 
-    data.forEach((row, index) => {
-        const tr = document.createElement('tr');
-        const tdUserId = document.createElement('td');
-        const tdResumeLink = document.createElement('td');
+        return jsonify({'status': 'success'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-        tdUserId.textContent = row.user_id;
-        const link = document.createElement('a');
-        link.href = row.resume_link;
-        link.target = '_blank';
-        link.textContent = `Resume${index + 1}`;
-        link.addEventListener('click', (event) => {
-            event.target.classList.add('red-link');
-        });
-
-        tdResumeLink.appendChild(link);
-
-        tr.appendChild(tdUserId);
-        tr.appendChild(tdResumeLink);
-        tableBody.appendChild(tr);
-    });
-}
-
-function displayMatchedResumes(data, keywords) {
-    const resultBody = document.querySelector('#resultTable tbody');
-    resultBody.innerHTML = '';  // Clear any existing rows
-
-    if (data.length > 0) {
-        data.forEach((entry, index) => {
-            const tr = document.createElement('tr');
-            const tdCheckbox = document.createElement('td');
-            const tdLink = document.createElement('td');
-            const tdUserId = document.createElement('td');
-            const tdPercentage = document.createElement('td');
-            const tdMatchedTechnologies = document.createElement('td'); // New column for matched technologies
-            const tdExistingTechnologies = document.createElement('td'); // New column for existing technologies
-
-            tdCheckbox.innerHTML = `<input type="checkbox" class="large-checkbox">`;
-
-            const link = document.createElement('a');
-            link.href = entry.resume_link;
-            link.target = '_blank';
-            link.textContent = `Resume${index + 1}`;
-            link.addEventListener('click', (event) => {
-                event.target.classList.add('red-link');
-            });
-
-            tdLink.appendChild(link);
-            tdUserId.textContent = entry.user_id;
-            tdPercentage.textContent = `${entry.percentage}%`;
-            tdMatchedTechnologies.textContent = entry.matched_technologies.join(', '); // Display matched technologies
-            tdExistingTechnologies.textContent = entry.existing_technologies.join(', '); // Display existing technologies
-
-            tr.appendChild(tdCheckbox);
-            tr.appendChild(tdLink);
-            tr.appendChild(tdUserId);
-            tr.appendChild(tdPercentage);
-            tr.appendChild(tdMatchedTechnologies);
-            tr.appendChild(tdExistingTechnologies);
-            resultBody.appendChild(tr);
-        });
-    } else {
-        const tr = document.createElement('tr');
-        const tdNoMatch = document.createElement('td');
-        tdNoMatch.setAttribute('colspan', '6'); // Updated colspan to 6
-        tdNoMatch.className = 'center-message';
-        tdNoMatch.textContent = `No matches found for keywords "${keywords}"`;
-        tr.appendChild(tdNoMatch);
-        resultBody.appendChild(tr);
-    }
-}
-
-function updateUploadCount(count) {
-    const uploadHeading = document.querySelector('#uploadHeading');
-    uploadHeading.textContent = `Upload CSV File (${count} users)`;
-}
-
-function updateSearchCount(count) {
-    const searchHeading = document.querySelector('#searchHeading');
-    searchHeading.textContent = `Search Keyword in Resumes (${count} matches)`;
-}
-
-function calculateEstimatedTime(numberOfPdfs) {
-    const timePerPdf = 1; // Estimate 1 second per PDF for processing
-    return numberOfPdfs * timePerPdf;
-}
-
-function startSearchTimer(estimatedTime) {
-    const resultBody = document.querySelector('#resultTable tbody');
-    resultBody.innerHTML = `
-        <tr>
-            <td colspan="6" class="center-message">
-                <div class="spin-container">
-                    <div class="ant-spin ant-spin-spinning">
-                        <span class="ant-spin-dot ant-spin-dot-spin">
-                            <i class="ant-spin-dot-item"></i>
-                            <i class="ant-spin-dot-item"></i>
-                            <i class="ant-spin-dot-item"></i>
-                            <i class="ant-spin-dot-item"></i>
-                        </span>
-                    </div>
-                    <div class="time" >Estimated Time: <span id="timer">${estimatedTime}</span> seconds</div>
-                </div>
-                <div class="progress-container">
-                    <progress id="progressBar" value="0" max="100"></progress>
-                </div>
-            </td>
-        </tr>`;
-    let timer = estimatedTime;
-    window.searchTimer = setInterval(() => {
-        timer--;
-        if (timer <= 0) {
-            clearInterval(window.searchTimer);
-        }
-        document.getElementById('timer').textContent = timer;
-    }, 1000);
-
-    let progressBar = document.getElementById('progressBar');
-    let progressInterval = setInterval(() => {
-        let progressValue = ((estimatedTime - timer) / estimatedTime) * 100;
-        progressBar.value = progressValue;
-        if (progressValue >= 100) {
-            clearInterval(progressInterval);
-        }
-    }, 1000);
-}
-
-function stopSearchTimer() {
-    clearInterval(window.searchTimer);
-    let progressBar = document.getElementById('progressBar');
-    progressBar.value = 100;
-}
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8000, debug=True)
